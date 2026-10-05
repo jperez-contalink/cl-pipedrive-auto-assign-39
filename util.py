@@ -120,7 +120,7 @@ def _select_random_open_stage_249_user(conn) -> Optional[Dict[str, Any]]:
               'yaneth.olivo@contalink.com',
               'gdelhoyo@tegik.com'
           )
-        ORDER BY asigned_today
+        ORDER BY asigned_today, random()
         LIMIT 1
         """,
     )
@@ -165,7 +165,48 @@ def _select_random_user(conn) -> Optional[Dict[str, Any]]:
               'yaneth.olivo@contalink.com',
               'gdelhoyo@tegik.com'
           )
-        ORDER BY asigned_today, promedio_mensual
+        ORDER BY asigned_today, promedio_mensual, random()
+        LIMIT 1
+        """,
+    )
+
+
+def _select_rehire_balanced_user(conn) -> Optional[Dict[str, Any]]:
+    """
+    Ronda para recontrataciones: primero iguala las recontrataciones
+    (tipo_lead = 347) asignadas hoy y después el total de deals del día.
+    """
+    return _query_one(
+        conn,
+        """
+        SELECT
+            u.id,
+            u.name,
+            (
+                SELECT COUNT(*)
+                FROM system_utils.crm_deal
+                WHERE assignment_time BETWEEN
+                    DATE(util_get_actual_date_empresa(578)) + interval '0 hours'
+                    AND DATE(util_get_actual_date_empresa(578)) + interval '23 hours 59 minutes 59 seconds'
+                  AND asigned_user_id = u.id
+                  AND tipo_lead::text = '347'
+            ) AS rehires_today,
+            (
+                SELECT COUNT(*)
+                FROM system_utils.crm_deal
+                WHERE assignment_time BETWEEN
+                    DATE(util_get_actual_date_empresa(578)) + interval '0 hours'
+                    AND DATE(util_get_actual_date_empresa(578)) + interval '23 hours 59 minutes 59 seconds'
+                  AND asigned_user_id = u.id
+            ) AS asigned_today
+        FROM system_utils.crm_users u
+        WHERE u.auto_assignment = true
+          AND u.email NOT IN (
+              'gdelhoyo@contalink.com',
+              'yaneth.olivo@contalink.com',
+              'gdelhoyo@tegik.com'
+          )
+        ORDER BY rehires_today, asigned_today, random()
         LIMIT 1
         """,
     )
@@ -261,6 +302,7 @@ def crm_assign_user_to_deal(
 
     assignment_type = "specific"
     user_result: Optional[Dict[str, Any]] = None
+    is_rehire = False
 
     actual_date = _get_actual_date(conn)
     won_age = actual_date
@@ -625,12 +667,9 @@ def crm_assign_user_to_deal(
             )
 
         if count_deal_inactive_contalink > 0:
-            user_result = _select_user_id_name_assigned_today(
-                conn,
-                email="dianelis.garcia@contalink.com",
-                require_auto_assignment=False,
-            )
-            assignment_type = "reactivate Dianelis"
+            user_result = _select_rehire_balanced_user(conn)
+            assignment_type = "rehire balanced assignment"
+            is_rehire = True
 
         if (
             count_recent_won_deal > 0
@@ -645,6 +684,7 @@ def crm_assign_user_to_deal(
                 require_auto_assignment=True,
             )
             assignment_type = "revision Gloria"
+            is_rehire = False
 
     elif (
         count_open_deal > 0
@@ -750,6 +790,27 @@ def crm_assign_user_to_deal(
 
     if aux_open_deals and len(aux_open_deals) > 10:
         return None
+
+    # ------------------------------------------------------------------
+    # Marcar recontratación en el deal que conservará la asignación
+    # (el OPEN más antiguo cuando habrá fusión).
+    # ------------------------------------------------------------------
+    if is_rehire:
+        rehire_deal_id = (
+            oldest_open_deal
+            if pending_fussion_deals and oldest_open_deal is not None
+            else deal_id
+        )
+        _execute(
+            conn,
+            """
+            UPDATE system_utils.crm_deal
+            SET tipo_lead = '347'
+            WHERE id = %s
+            """,
+            (rehire_deal_id,),
+        )
+        log("REHIRE_MARKED", rehire_deal_id)
 
     result = {
         "user": _to_json_compatible(user_result),

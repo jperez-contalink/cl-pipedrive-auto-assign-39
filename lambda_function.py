@@ -135,16 +135,18 @@ def utms_from_person(deal_id):
                 + os.environ['PIPE_TOKEN']
             )
             
-            updateBody = json.dumps({
+            updatePayload = {
                 "1fba77d95708dcb09f4be2adc40275eeb3479138": first_visit_date,
                 "448a0af69a24744b729ba2c494bb172609cf30f3": first_utm,
                 "1ec1628154aca7d01b14638424caabfdc83834ea": utm_campaign,
                 "39f425f87fc043b3a7a82419cd11aa3187837eb8": utm_medium,
                 "1b2aa66ccef5fa6bc8a7ac45172cd8849fb16d21": utm_source
-            })
+            }
 
             if lead_type is not None:
-                updateBody["3098fab920387ade3b098c60b1230bdb516723d8"] = lead_type
+                updatePayload["3098fab920387ade3b098c60b1230bdb516723d8"] = lead_type
+
+            updateBody = json.dumps(updatePayload)
 
             headers = {
                 'Content-Type': 'application/json',
@@ -812,12 +814,12 @@ def lambda_handler(event, context):
             automatic_assign = get_automatic_assign_python(
                 environment,
                 deal['deal_id'],
-                commit=False,
+                commit=True,
                 debug=True
             )
             print("asignacion piloto:" + str(automatic_assign))
 
-            automatic_assign = get_automatic_assign(environment, deal['deal_id'])
+            #automatic_assign = get_automatic_assign(environment, deal['deal_id'])
             automatic_assign_id = automatic_assign["user"]["id"]
             addNoteAuxiliar(environment, automatic_assign["user"]["id"], deal['deal_id'])
             print("asignacion automatica:" + str(automatic_assign))
