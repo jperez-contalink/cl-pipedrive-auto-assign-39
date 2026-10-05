@@ -808,7 +808,7 @@ def lambda_handler(event, context):
             #else:
             #    print("No se pudo asignar agente, saltando actualización de actividades.")
             
-            print(" + + + +  A S I G N A C I O N   P I L O T O + + + + ")
+            print(" + + + +  A S I G N A C I O N   A U T O M A T I C A + + + + ")
             automatic_assign = get_automatic_assign_python(
                 environment,
                 deal['deal_id'],
