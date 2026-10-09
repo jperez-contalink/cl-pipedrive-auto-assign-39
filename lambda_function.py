@@ -200,7 +200,7 @@ def isPipeDriveLite(person_id, person_two_id):
 
 VAOLD_STAGES = (124, 213)
 VAOLD_OWNER_ID = 11789927
-VAOLD_TARGET_STAGE = 250
+VAOLD_TARGET_STAGE = 249
 # Pipedrive regresa add_time en UTC; México centro es UTC-6 todo el año.
 VAOLD_FROM = datetime(2026, 10, 8, tzinfo=timezone(timedelta(hours=-6)))
 # Se cuenta desde add_time: moverse entre 213 y 124 no reinicia el plazo.
