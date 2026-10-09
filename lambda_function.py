@@ -5,6 +5,7 @@ import requests
 import traceback
 import os
 import re
+from datetime import datetime, timedelta, timezone
 from contalink_integration import set_va_deal_record_deal_id, get_automatic_assign, get_automatic_va_assign, get_all_pending_deals, set_assign_deal_to_true, set_va_deal_to_true, send_template_hilo, get_all_va_deals, set_auxiliar_agent, unset_auxiliar_in_deal
 from api_functions import get_pending_deals, iterate_deals
 from contalink_integration import get_automatic_assign_python
@@ -196,6 +197,87 @@ def isPipeDriveLite(person_id, person_two_id):
             return True            
     print("No es persona 2 Lite")
     return False
+
+VAOLD_STAGES = (124, 213)
+VAOLD_OWNER_ID = 11789927
+VAOLD_TARGET_STAGE = 250
+# Pipedrive regresa add_time en UTC; México centro es UTC-6 todo el año.
+VAOLD_FROM = datetime(2026, 10, 8, tzinfo=timezone(timedelta(hours=-6)))
+# Se cuenta desde add_time: moverse entre 213 y 124 no reinicia el plazo.
+VAOLD_MIN_AGE = timedelta(hours=4)
+
+
+def get_stale_va_deals():
+    """Deals abiertos de venta autónoma (signup) que no avanzaron a pago."""
+    base_url = os.environ['PIPE_URL_V2']
+    api_token = os.environ['PIPE_TOKEN']
+    stale_deals = []
+    created_before = datetime.now(timezone.utc) - VAOLD_MIN_AGE
+
+    for stage_id in VAOLD_STAGES:
+        cursor = None
+        while True:
+            params = {
+                'api_token': api_token,
+                'owner_id': VAOLD_OWNER_ID,
+                'stage_id': stage_id,
+                'status': 'open',
+                'limit': 500,
+            }
+            if cursor:
+                params['cursor'] = cursor
+
+            r = requests.get(base_url + "deals", params=params)
+            r.raise_for_status()
+            result = r.json()
+
+            for deal in result.get('data') or []:
+                add_time = deal.get('add_time')
+                if not add_time:
+                    continue
+                add_time = datetime.fromisoformat(add_time.replace('Z', '+00:00'))
+                if VAOLD_FROM <= add_time <= created_before:
+                    stale_deals.append(deal['id'])
+
+            cursor = (result.get('additional_data') or {}).get('next_cursor')
+            if not cursor:
+                break
+
+    return stale_deals
+
+
+def move_stale_va_deals():
+    print("VAOLD: mover deals de venta autónoma sin pago a stage " + str(VAOLD_TARGET_STAGE))
+    base_url = os.environ['PIPE_URL_V2']
+    api_token = os.environ['PIPE_TOKEN']
+    moved = []
+    errors = []
+
+    deals = get_stale_va_deals()
+    print("VAOLD deals encontrados:")
+    print(deals)
+
+    for deal_id in deals:
+        try:
+            r = requests.patch(
+                base_url + "deals/" + str(deal_id),
+                params={'api_token': api_token},
+                json={'stage_id': VAOLD_TARGET_STAGE},
+            )
+            result = r.json()
+            if result.get('success'):
+                moved.append(deal_id)
+            else:
+                print("VAOLD error al mover deal " + str(deal_id) + ": " + r.text)
+                errors.append(deal_id)
+        except Exception as e:
+            print("VAOLD excepción al mover deal " + str(deal_id) + ": " + str(e))
+            errors.append(deal_id)
+
+    response = {'moved': moved, 'errors': errors}
+    print(response)
+    return response
+
 
 def merge_va_deals(environment):
     print("Merging VA Deals")
@@ -765,6 +847,8 @@ def lambda_handler(event, context):
         # TODO Cambiar para deploys
         if 'body-json' in event:
             environment = event['body-json']['ENV'] # Lambda
+            if event['body-json'].get('VAOLD') is True:
+                return move_stale_va_deals()
             if 'VA' in event['body-json']:
                 if event['body-json']['VA'] is True:
                     merge_va_deals(environment)
