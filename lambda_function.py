@@ -279,6 +279,103 @@ def move_stale_va_deals():
     return response
 
 
+PERFMKT_SOURCE_PIPELINE = 3
+PERFMKT_EXCLUDED_STAGE = 249
+PERFMKT_EXCLUDED_OWNER = 11789927
+PERFMKT_LEAD_TYPE_FIELD = '3098fab920387ade3b098c60b1230bdb516723d8'
+PERFMKT_LEAD_TYPES = ('711',)
+PERFMKT_TARGET_PIPELINE = 33
+PERFMKT_TARGET_STAGE = 320
+PERFMKT_FROM = datetime(2026, 10, 13, tzinfo=timezone(timedelta(hours=-6)))
+# A los 10 minutos de creado el deal ya pasó por todas las automatizaciones.
+PERFMKT_MIN_AGE = timedelta(minutes=10)
+# Un deal movido sale del pipeline 3, así que releer la ventana no lo duplica;
+# sólo se perderían deals si el proceso deja de correr más de este tiempo.
+PERFMKT_LOOKBACK = timedelta(hours=24)
+
+
+def get_perfmkt_deals():
+    """Deals abiertos del pipeline 3 que deben pasar a Perfilamiento MKT."""
+    base_url = os.environ['PIPE_URL_V2']
+    api_token = os.environ['PIPE_TOKEN']
+    now = datetime.now(timezone.utc)
+    created_before = now - PERFMKT_MIN_AGE
+    created_after = max(PERFMKT_FROM, now - PERFMKT_LOOKBACK)
+    deals = []
+    cursor = None
+
+    while True:
+        params = {
+            'api_token': api_token,
+            'pipeline_id': PERFMKT_SOURCE_PIPELINE,
+            'status': 'open',
+            'sort_by': 'add_time',
+            'sort_direction': 'desc',
+            'limit': 100,
+        }
+        if cursor:
+            params['cursor'] = cursor
+
+        r = requests.get(base_url + "deals", params=params)
+        r.raise_for_status()
+        result = r.json()
+
+        for deal in result.get('data') or []:
+            add_time = datetime.fromisoformat(deal['add_time'].replace('Z', '+00:00'))
+            if add_time < created_after:
+                return deals
+            if add_time > created_before:
+                continue
+            if deal.get('stage_id') == PERFMKT_EXCLUDED_STAGE:
+                continue
+            if deal.get('owner_id') == PERFMKT_EXCLUDED_OWNER:
+                continue
+            lead_type = (deal.get('custom_fields') or {}).get(PERFMKT_LEAD_TYPE_FIELD)
+            if lead_type is not None and str(lead_type) not in PERFMKT_LEAD_TYPES:
+                continue
+            deals.append(deal['id'])
+
+        cursor = (result.get('additional_data') or {}).get('next_cursor')
+        if not cursor:
+            return deals
+
+
+def move_perfmkt_deals():
+    print("PERFMKT: mover deals a pipeline " + str(PERFMKT_TARGET_PIPELINE) + " stage " + str(PERFMKT_TARGET_STAGE))
+    base_url = os.environ['PIPE_URL_V2']
+    api_token = os.environ['PIPE_TOKEN']
+    moved = []
+    errors = []
+
+    deals = get_perfmkt_deals()
+    print("PERFMKT deals encontrados:")
+    print(deals)
+
+    for deal_id in deals:
+        try:
+            r = requests.patch(
+                base_url + "deals/" + str(deal_id),
+                params={'api_token': api_token},
+                json={
+                    'pipeline_id': PERFMKT_TARGET_PIPELINE,
+                    'stage_id': PERFMKT_TARGET_STAGE,
+                },
+            )
+            result = r.json()
+            if result.get('success'):
+                moved.append(deal_id)
+            else:
+                print("PERFMKT error al mover deal " + str(deal_id) + ": " + r.text)
+                errors.append(deal_id)
+        except Exception as e:
+            print("PERFMKT excepción al mover deal " + str(deal_id) + ": " + str(e))
+            errors.append(deal_id)
+
+    response = {'moved': moved, 'errors': errors}
+    print(response)
+    return response
+
+
 def merge_va_deals(environment):
     print("Merging VA Deals")
     print("START")
@@ -849,6 +946,8 @@ def lambda_handler(event, context):
             environment = event['body-json']['ENV'] # Lambda
             if event['body-json'].get('VAOLD') is True:
                 return move_stale_va_deals()
+            if event['body-json'].get('PERFMKT') is True:
+                return move_perfmkt_deals()
             if 'VA' in event['body-json']:
                 if event['body-json']['VA'] is True:
                     merge_va_deals(environment)
