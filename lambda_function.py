@@ -279,23 +279,21 @@ def move_stale_va_deals():
     return response
 
 
-PERFMKT_SOURCE_PIPELINE = 3
-PERFMKT_EXCLUDED_STAGE = 249
+PERFMKT_SOURCE_STAGE = 250
 PERFMKT_EXCLUDED_OWNER = 11789927
-PERFMKT_LEAD_TYPE_FIELD = '3098fab920387ade3b098c60b1230bdb516723d8'
-PERFMKT_LEAD_TYPES = ('711',)
+PERFMKT_CONTACT_MEDIUM_FIELD = 'eaf8d47de8714896fff87d841884cc6a7d3367f9'
 PERFMKT_TARGET_PIPELINE = 33
 PERFMKT_TARGET_STAGE = 320
 PERFMKT_FROM = datetime(2026, 10, 13, tzinfo=timezone(timedelta(hours=-6)))
 # A los 10 minutos de creado el deal ya pasó por todas las automatizaciones.
 PERFMKT_MIN_AGE = timedelta(minutes=10)
-# Un deal movido sale del pipeline 3, así que releer la ventana no lo duplica;
+# Un deal movido sale de la etapa 250, así que releer la ventana no lo duplica;
 # sólo se perderían deals si el proceso deja de correr más de este tiempo.
 PERFMKT_LOOKBACK = timedelta(hours=24)
 
 
 def get_perfmkt_deals():
-    """Deals abiertos del pipeline 3 que deben pasar a Perfilamiento MKT."""
+    """Deals abiertos en Primer Contacto (250) que deben pasar a Perfilamiento MKT."""
     base_url = os.environ['PIPE_URL_V2']
     api_token = os.environ['PIPE_TOKEN']
     now = datetime.now(timezone.utc)
@@ -307,7 +305,7 @@ def get_perfmkt_deals():
     while True:
         params = {
             'api_token': api_token,
-            'pipeline_id': PERFMKT_SOURCE_PIPELINE,
+            'stage_id': PERFMKT_SOURCE_STAGE,
             'status': 'open',
             'sort_by': 'add_time',
             'sort_direction': 'desc',
@@ -326,12 +324,9 @@ def get_perfmkt_deals():
                 return deals
             if add_time > created_before:
                 continue
-            if deal.get('stage_id') == PERFMKT_EXCLUDED_STAGE:
-                continue
             if deal.get('owner_id') == PERFMKT_EXCLUDED_OWNER:
                 continue
-            lead_type = (deal.get('custom_fields') or {}).get(PERFMKT_LEAD_TYPE_FIELD)
-            if lead_type is not None and str(lead_type) not in PERFMKT_LEAD_TYPES:
+            if (deal.get('custom_fields') or {}).get(PERFMKT_CONTACT_MEDIUM_FIELD) is not None:
                 continue
             deals.append(deal['id'])
 
