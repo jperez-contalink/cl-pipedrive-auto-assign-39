@@ -232,6 +232,15 @@ def _is_crm_user_active(
 
     return row is not None
 
+def _get_deal_owner(conn, deal_id: Optional[int]) -> Optional[Dict[str, Any]]:
+    row = _query_one(
+        conn,
+        "SELECT asigned_user_id FROM system_utils.crm_deal WHERE id = %s",
+        (deal_id,),
+    )
+    return _get_crm_user(conn, row.get("asigned_user_id") if row else None)
+
+
 def _get_crm_user(conn, user_id: Optional[int]) -> Optional[Dict[str, Any]]:
     if user_id is None:
         return None
@@ -686,26 +695,23 @@ def crm_assign_user_to_deal(
             assignment_type = "revision Gloria"
             is_rehire = False
 
+        # Una recontratación con un deal abierto ya trabajado no se le quita
+        # a su dueño: se fusiona en ese deal y se conserva el owner.
+        if (
+            is_rehire
+            and count_open_deal > 0
+            and oldest_stage_id is not None
+            and oldest_stage_id != 249
+        ):
+            user_result = _get_deal_owner(conn, oldest_open_deal)
+            assignment_type = "rehire_merge_keep_owner"
+
     elif (
         count_open_deal > 0
         and oldest_stage_id is not None
         and oldest_stage_id != 249
     ):
-        oldest_deal_row = _query_one(
-            conn,
-            """
-            SELECT asigned_user_id
-            FROM system_utils.crm_deal
-            WHERE id = %s
-            """,
-            (oldest_open_deal,),
-        )
-        oldest_user_id = (
-            oldest_deal_row.get("asigned_user_id")
-            if oldest_deal_row
-            else None
-        )
-        user_result = _get_crm_user(conn, oldest_user_id)
+        user_result = _get_deal_owner(conn, oldest_open_deal)
         assignment_type = "Open deal fussion and notify"
 
     elif count_open_deal > 0 and oldest_stage_id == 249:
