@@ -371,6 +371,13 @@ def move_perfmkt_deals():
     return response
 
 
+MERGE_2ND_PHASE_COPIED_FIELDS = (
+    '3098fab920387ade3b098c60b1230bdb516723d8',  # tipo de lead
+    'c2157d1b51b616525377caf343241bf3ddfffa4a',  # canal de venta
+    'eaf8d47de8714896fff87d841884cc6a7d3367f9',  # medio de contacto
+)
+
+
 def merge_va_deals(environment):
     print("Merging VA Deals")
     print("START")
@@ -464,6 +471,9 @@ def merge_va_deals(environment):
                 # Mergear y prevalecer Inbound
                 print("Merge 2nd Phase")
                 type_lead_priority = get_type_lead_priority( str(deal['deal_id']), [str(automatic_assign["merge_deal_id"])]) # 280526
+                # Se leen antes del merge porque después el deal inbound queda eliminado.
+                open_deal_info = get_deal_info(automatic_assign["merge_deal_id"])
+                open_deal_fields = (open_deal_info or {}).get('data') or {}
                 try:
                     merge_deal_url = (
                         os.environ['PIPE_URL'] 
@@ -508,7 +518,14 @@ def merge_va_deals(environment):
                         if type_lead_priority["update"]: # 280526
                             payload_dict["3098fab920387ade3b098c60b1230bdb516723d8"] = type_lead_priority["type_lead"]
 
+                        # Tipo de lead, canal de venta y medio de contacto del deal inbound;
+                        # un valor vacío no sobrescribe el del deal VA.
+                        for field_key in MERGE_2ND_PHASE_COPIED_FIELDS:
+                            if open_deal_fields.get(field_key) is not None:
+                                payload_dict[field_key] = open_deal_fields[field_key]
+
                         updateBody = json.dumps(payload_dict)
+                        print("MERGE_2ND_PHASE update deal " + str(deal['deal_id']) + ": " + updateBody)
 
                         headers = {
                           'Content-Type': 'application/json',
@@ -516,6 +533,8 @@ def merge_va_deals(environment):
                         }
                     
                         r = requests.request("PUT", full_url, headers=headers, data=updateBody)
+                        if not json.loads(r.text).get('success'):
+                            print("MERGE_2ND_PHASE error al actualizar deal " + str(deal['deal_id']) + ": " + r.text)
                         ##############################################################                        
                         
                     else:
