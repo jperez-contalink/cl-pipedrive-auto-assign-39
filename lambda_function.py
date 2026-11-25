@@ -201,6 +201,8 @@ def isPipeDriveLite(person_id, person_two_id):
 VAOLD_STAGES = (124, 213)
 VAOLD_OWNER_ID = 11789927
 VAOLD_TARGET_STAGE = 249
+VAOLD_CANAL_VENTA_FIELD = 'c2157d1b51b616525377caf343241bf3ddfffa4a'
+VAOLD_CANAL_VENTA = 426
 # Pipedrive regresa add_time en UTC; México centro es UTC-6 todo el año.
 VAOLD_FROM = datetime(2026, 10, 8, tzinfo=timezone(timedelta(hours=-6)))
 # Se cuenta desde add_time: moverse entre 213 y 124 no reinicia el plazo.
@@ -262,7 +264,10 @@ def move_stale_va_deals():
             r = requests.patch(
                 base_url + "deals/" + str(deal_id),
                 params={'api_token': api_token},
-                json={'stage_id': VAOLD_TARGET_STAGE},
+                json={
+                    'stage_id': VAOLD_TARGET_STAGE,
+                    'custom_fields': {VAOLD_CANAL_VENTA_FIELD: VAOLD_CANAL_VENTA},
+                },
             )
             result = r.json()
             if result.get('success'):
